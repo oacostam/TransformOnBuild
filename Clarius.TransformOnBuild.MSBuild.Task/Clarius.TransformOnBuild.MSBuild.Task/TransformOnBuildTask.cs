@@ -13,12 +13,16 @@ namespace Clarius.TransformOnBuild.MSBuild.Task
 {
     public class TransformOnBuildTask : Microsoft.Build.Utilities.Task
     {
+        private const BindingFlags BindingFlags = System.Reflection.BindingFlags.NonPublic |
+                                                  System.Reflection.BindingFlags.FlattenHierarchy |
+                                                  System.Reflection.BindingFlags.Instance |
+                                                  System.Reflection.BindingFlags.Public;
+
+        private string _commonProgramFiles;
         private ProjectInstance _projectInstance;
         private Dictionary<string, string> _properties;
-        private string _commonProgramFiles;
         private string _textTransformPath;
         private string _transformExe;
-        const BindingFlags BindingFlags = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.FlattenHierarchy | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public;
 
         public override bool Execute()
         {
@@ -44,9 +48,14 @@ namespace Clarius.TransformOnBuild.MSBuild.Task
             {
                 var templatePath = templateItem.GetMetadataValue("FullPath");
                 var templateBackupPath = templatePath + ".bak_clarius";
+                var isTemplatePathReadOnly = false;
                 try
                 {
-                    File.Copy(templatePath, templateBackupPath, overwrite: true);
+                    isTemplatePathReadOnly = (File.GetAttributes(templatePath) & FileAttributes.ReadOnly) ==
+                                             FileAttributes.ReadOnly;
+                    if (isTemplatePathReadOnly)
+                        File.SetAttributes(templatePath, ~FileAttributes.ReadOnly);
+                    File.Copy(templatePath, templateBackupPath, true);
 
                     RewriteTemplateFile(templatePath);
 
@@ -57,10 +66,13 @@ namespace Clarius.TransformOnBuild.MSBuild.Task
                 }
                 finally
                 {
-                    File.Copy(templateBackupPath, templatePath, overwrite: true);
+                    File.Copy(templateBackupPath, templatePath, true);
                     File.Delete(templateBackupPath);
+                    if (isTemplatePathReadOnly)
+                        File.SetAttributes(templatePath, FileAttributes.ReadOnly);
                 }
             }
+
 
             return true;
         }
@@ -84,7 +96,8 @@ namespace Clarius.TransformOnBuild.MSBuild.Task
 
         private string RewriteTemplateContent(string template)
         {
-            var result = Regex.Replace(template, @"(?im)(<#@\s*assembly\s+name\s*=\s*"".*?""|<#@\s*include\s+file\s*=\s*"".*?"")",
+            var result = Regex.Replace(template,
+                @"(?im)(<#@\s*assembly\s+name\s*=\s*"".*?""|<#@\s*include\s+file\s*=\s*"".*?"")",
                 m => ExpandVariables(m.Value));
             return result;
         }
@@ -92,7 +105,8 @@ namespace Clarius.TransformOnBuild.MSBuild.Task
         private string ExpandVariables(string str)
         {
             var result = Environment.ExpandEnvironmentVariables(str);
-            result = Regex.Replace(result, @"\$\((?<PropertyName>.+?)\)", m => GetPropertyValue(m.Groups["PropertyName"].Value, throwIfNotFound: true));
+            result = Regex.Replace(result, @"\$\((?<PropertyName>.+?)\)",
+                m => GetPropertyValue(m.Groups["PropertyName"].Value, true));
             return result;
         }
 
@@ -133,42 +147,50 @@ namespace Clarius.TransformOnBuild.MSBuild.Task
         {
             _commonProgramFiles = Environment.GetEnvironmentVariable("CommonProgramFiles(x86)");
             if (string.IsNullOrEmpty(_commonProgramFiles))
+            {
                 _commonProgramFiles = GetPropertyValue("CommonProgramFiles");
+            }
 
             _textTransformPath = GetPropertyValue("TextTransformPath");
             if (string.IsNullOrEmpty(_textTransformPath))
-                _textTransformPath = string.Format(@"{0}\Microsoft Shared\TextTemplating\{1}\TextTransform.exe", _commonProgramFiles, GetPropertyValue("VisualStudioVersion"));
+                _textTransformPath =
+                    $@"{_commonProgramFiles}\Microsoft Shared\TextTemplating\{
+                            GetPropertyValue("VisualStudioVersion")
+                        }\TextTransform.exe";
 
             // Initial default value
             _transformExe = _textTransformPath;
 
             // Cascading probing if file not found
             if (!File.Exists(_transformExe))
-                _transformExe = string.Format(@"{0}\Microsoft Shared\TextTemplating\10.0\TextTransform.exe", _commonProgramFiles);
+                _transformExe = $@"{_commonProgramFiles}\Microsoft Shared\TextTemplating\10.0\TextTransform.exe";
             if (!File.Exists(_transformExe))
-                _transformExe = string.Format(@"{0}\Microsoft Shared\TextTemplating\11.0\TextTransform.exe", _commonProgramFiles);
+                _transformExe = $@"{_commonProgramFiles}\Microsoft Shared\TextTemplating\11.0\TextTransform.exe";
             if (!File.Exists(_transformExe))
-                _transformExe = string.Format(@"{0}\Microsoft Shared\TextTemplating\12.0\TextTransform.exe", _commonProgramFiles);
+                _transformExe = $@"{_commonProgramFiles}\Microsoft Shared\TextTemplating\12.0\TextTransform.exe";
             // Future proof 'til VS2013+2
             if (!File.Exists(_transformExe))
-                _transformExe = string.Format(@"{0}\Microsoft Shared\TextTemplating\13.0\TextTransform.exe", _commonProgramFiles);
+                _transformExe = $@"{_commonProgramFiles}\Microsoft Shared\TextTemplating\13.0\TextTransform.exe";
             if (!File.Exists(_transformExe))
-                _transformExe = string.Format(@"{0}\Microsoft Shared\TextTemplating\14.0\TextTransform.exe", _commonProgramFiles);
+                _transformExe = $@"{_commonProgramFiles}\Microsoft Shared\TextTemplating\14.0\TextTransform.exe";
         }
 
         /// <summary>
-        /// Inspired by http://stackoverflow.com/questions/3043531/when-implementing-a-microsoft-build-utilities-task-how-to-i-get-access-to-the-va
+        ///     Inspired by
+        ///     http://stackoverflow.com/questions/3043531/when-implementing-a-microsoft-build-utilities-task-how-to-i-get-access-to-the-va
         /// </summary>
         /// <returns></returns>
         private ProjectInstance GetProjectInstance()
         {
             var buildEngineType = BuildEngine.GetType();
-            var targetBuilderCallbackField = buildEngineType.GetField("targetBuilderCallback", BindingFlags) ?? buildEngineType.GetField("_targetBuilderCallback", BindingFlags);
+            var targetBuilderCallbackField = buildEngineType.GetField("targetBuilderCallback", BindingFlags) ??
+                                             buildEngineType.GetField("_targetBuilderCallback", BindingFlags);
             if (targetBuilderCallbackField == null)
                 throw new Exception("Could not extract targetBuilderCallback from " + buildEngineType.FullName);
             var targetBuilderCallback = targetBuilderCallbackField.GetValue(BuildEngine);
             var targetCallbackType = targetBuilderCallback.GetType();
-            var projectInstanceField = targetCallbackType.GetField("projectInstance", BindingFlags) ?? targetCallbackType.GetField("_projectInstance", BindingFlags);
+            var projectInstanceField = targetCallbackType.GetField("projectInstance", BindingFlags) ??
+                                       targetCallbackType.GetField("_projectInstance", BindingFlags);
             if (projectInstanceField == null)
                 throw new Exception("Could not extract projectInstance from " + targetCallbackType.FullName);
             return (ProjectInstance) projectInstanceField.GetValue(targetBuilderCallback);
@@ -180,7 +202,7 @@ namespace Clarius.TransformOnBuild.MSBuild.Task
             if (_properties.TryGetValue(propertyName, out propertyValue))
                 return propertyValue;
             if (throwIfNotFound)
-                throw new Exception(string.Format("Could not resolve property $({0})", propertyName));
+                throw new Exception($"Could not resolve property $({propertyName})");
             return "";
         }
     }
