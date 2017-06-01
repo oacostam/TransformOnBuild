@@ -18,26 +18,26 @@ namespace Clarius.TransformOnBuild.MSBuild.Task
                                                   System.Reflection.BindingFlags.Instance |
                                                   System.Reflection.BindingFlags.Public;
 
-        private string _commonProgramFiles;
-        private ProjectInstance _projectInstance;
-        private Dictionary<string, string> _properties;
-        private string _textTransformPath;
-        private string _transformExe;
+        private string commonProgramFiles;
+        private ProjectInstance projectInstance;
+        private Dictionary<string, string> properties;
+        private string textTransformPath;
+        private string transformExe;
 
         public override bool Execute()
         {
-            _projectInstance = GetProjectInstance();
-            _properties = _projectInstance.Properties.ToDictionary(p => p.Name, p => p.EvaluatedValue);
+            projectInstance = GetProjectInstance();
+            properties = projectInstance.Properties.ToDictionary(p => p.Name, p => p.EvaluatedValue);
 
             InitPathProperties();
 
-            if (!File.Exists(_transformExe))
+            if (!File.Exists(transformExe))
             {
-                Log.LogError("Failed to find TextTransform.exe tool at '{0}'.", _transformExe);
+                Log.LogError("Failed to find TextTransform.exe tool at '{0}'.", transformExe);
                 return false;
             }
 
-            var textTransform = _projectInstance.Items.Where(i =>
+            var textTransform = projectInstance.Items.Where(i =>
             {
                 var comparer = StringComparer.InvariantCultureIgnoreCase;
                 return (comparer.Equals(i.ItemType, "None") || comparer.Equals(i.ItemType, "Content")) &&
@@ -116,7 +116,7 @@ namespace Clarius.TransformOnBuild.MSBuild.Task
             {
                 StartInfo = new ProcessStartInfo
                 {
-                    FileName = _transformExe,
+                    FileName = transformExe,
                     Arguments = $"\"{templatePath}\"",
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
@@ -145,34 +145,34 @@ namespace Clarius.TransformOnBuild.MSBuild.Task
 
         private void InitPathProperties()
         {
-            _commonProgramFiles = Environment.GetEnvironmentVariable("CommonProgramFiles(x86)");
-            if (string.IsNullOrEmpty(_commonProgramFiles))
+            commonProgramFiles = Environment.GetEnvironmentVariable("CommonProgramFiles(x86)");
+            if (string.IsNullOrEmpty(commonProgramFiles))
             {
-                _commonProgramFiles = GetPropertyValue("CommonProgramFiles");
+                commonProgramFiles = GetPropertyValue("CommonProgramFiles");
             }
 
-            _textTransformPath = GetPropertyValue("TextTransformPath");
-            if (string.IsNullOrEmpty(_textTransformPath))
-                _textTransformPath =
-                    $@"{_commonProgramFiles}\Microsoft Shared\TextTemplating\{
+            textTransformPath = GetPropertyValue("TextTransformPath");
+            if (string.IsNullOrEmpty(textTransformPath))
+                textTransformPath =
+                    $@"{commonProgramFiles}\Microsoft Shared\TextTemplating\{
                             GetPropertyValue("VisualStudioVersion")
                         }\TextTransform.exe";
 
             // Initial default value
-            _transformExe = _textTransformPath;
+            transformExe = textTransformPath;
 
             // Cascading probing if file not found
-            if (!File.Exists(_transformExe))
-                _transformExe = $@"{_commonProgramFiles}\Microsoft Shared\TextTemplating\10.0\TextTransform.exe";
-            if (!File.Exists(_transformExe))
-                _transformExe = $@"{_commonProgramFiles}\Microsoft Shared\TextTemplating\11.0\TextTransform.exe";
-            if (!File.Exists(_transformExe))
-                _transformExe = $@"{_commonProgramFiles}\Microsoft Shared\TextTemplating\12.0\TextTransform.exe";
+            if (!File.Exists(transformExe))
+                transformExe = $@"{commonProgramFiles}\Microsoft Shared\TextTemplating\10.0\TextTransform.exe";
+            if (!File.Exists(transformExe))
+                transformExe = $@"{commonProgramFiles}\Microsoft Shared\TextTemplating\11.0\TextTransform.exe";
+            if (!File.Exists(transformExe))
+                transformExe = $@"{commonProgramFiles}\Microsoft Shared\TextTemplating\12.0\TextTransform.exe";
             // Future proof 'til VS2013+2
-            if (!File.Exists(_transformExe))
-                _transformExe = $@"{_commonProgramFiles}\Microsoft Shared\TextTemplating\13.0\TextTransform.exe";
-            if (!File.Exists(_transformExe))
-                _transformExe = $@"{_commonProgramFiles}\Microsoft Shared\TextTemplating\14.0\TextTransform.exe";
+            if (!File.Exists(transformExe))
+                transformExe = $@"{commonProgramFiles}\Microsoft Shared\TextTemplating\13.0\TextTransform.exe";
+            if (!File.Exists(transformExe))
+                transformExe = $@"{commonProgramFiles}\Microsoft Shared\TextTemplating\14.0\TextTransform.exe";
         }
 
         /// <summary>
@@ -199,7 +199,7 @@ namespace Clarius.TransformOnBuild.MSBuild.Task
         private string GetPropertyValue(string propertyName, bool throwIfNotFound = false)
         {
             string propertyValue;
-            if (_properties.TryGetValue(propertyName, out propertyValue))
+            if (properties.TryGetValue(propertyName, out propertyValue))
                 return propertyValue;
             if (throwIfNotFound)
                 throw new Exception($"Could not resolve property $({propertyName})");
